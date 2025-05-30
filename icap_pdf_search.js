@@ -1,13 +1,97 @@
 
-(function() {
-  if (window.ICAP_LOADED) return;
-  window.ICAP_LOADED = true;
+// == Stealth Proximity Search ==
+// Floating input box for proximity keyword match on any page
 
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = '<div id="icap-search-container" style="position:fixed;top:10px;right:10px;z-index:99999;background:white;border:1px solid #ccc;padding:10px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,0.2);font-family:sans-serif;">  <input type="text" id="search-words" placeholder="Enter words, comma-separated" style="width:200px;margin-right:10px;">  <button id="search-button">Search</button>  <button id="clear-button">Clear</button>  <div id="match-count" style="margin-top:5px;font-size:0.9em;color:#555;"></div></div>';
-  document.body.appendChild(wrapper);
+(function () {
+  if (window.__stealthSearchRunning) return;
+  window.__stealthSearchRunning = true;
 
-  const script = document.createElement('script');
-  script.innerHTML = '// Utility function to check if all keywords appear within a 30-word windowfunction areKeywordsNear(text, keywords, maxWordsBetween = 30) {    // Convert text to lowercase and split into words    const words = text.toLowerCase().split(/\s+/);    const keywordSet = new Set(keywords.map(k => k.toLowerCase()));        // Create a map to track the last seen position of each keyword    const lastSeen = new Map();    let foundAll = false;        for (let i = 0; i < words.length; i++) {        const word = words[i];        // Check if current word is one of our keywords        for (const keyword of keywordSet) {            if (word.includes(keyword.toLowerCase())) {                lastSeen.set(keyword, i);                                // Check if we\'ve seen all keywords within the window                if (lastSeen.size === keywordSet.size) {                    const positions = Array.from(lastSeen.values());                    const minPos = Math.min(...positions);                    const maxPos = Math.max(...positions);                                        // If all keywords are within maxWordsBetween words of each other                    if (maxPos - minPos <= maxWordsBetween + keywordSet.size - 1) {                        foundAll = true;                        break;                    }                }            }        }        if (foundAll) break;                // Remove old positions that are too far back        for (const [kw, pos] of lastSeen.entries()) {            if (i - pos > maxWordsBetween + keywordSet.size) {                lastSeen.delete(kw);            }        }    }        return foundAll;}// Function to extract text from a PDF documentasync function extractTextFromPDF(pdfDocument, keywords) {    console.log(\'Starting text extraction...\');    const results = [];    try {        // Get total number of pages        const numPages = pdfDocument.numPages;        if (!numPages) {            console.error(\'No pages found in PDF\');            return [];        }        console.log(\'Total pages:\', numPages);        // Process each page        for (let i = 1; i <= numPages; i++) {            try {                console.log(\'Processing page:\', i);                const page = await pdfDocument.getPage(i);                if (!page) {                    console.error(\'Failed to get page:\', i);                    continue;                }                const textContent = await page.getTextContent();                if (!textContent?.items?.length) {                    console.error(\'No text content found on page:\', i);                    continue;                }                // Combine all text items into a single string                const text = textContent.items                    .map(item => item.str || \'\')                    .join(\' \');                if (!text.trim()) {                    console.log(\'No text found on page:\', i);                    continue;                }                console.log(`Page ${i} text length:`, text.length);                // Check if keywords appear within the specified distance                if (areKeywordsNear(text, keywords)) {                    results.push({                        page: i,                        text: text.substring(0, 200) + (text.length > 200 ? \'...\' : \'\')                    });                }            } catch (error) {                console.error(`Error processing page ${i}:`, error);            }        }    } catch (error) {        console.error(\'Error in extractTextFromPDF:\', error);    }        console.log(\'Text extraction complete. Found results:\', results.length);    return results;}// Function to highlight search terms in the PDF viewerasync function highlightResultInPage(result) {    console.log(\'highlightResultInPage called with:\', result);    if (!result) return;    // Try to get the PDF.js viewer instance    const pdfViewer = window.PDFViewerApplication?.pdfViewer;    if (!pdfViewer) {        console.error(\'PDF viewer not found\');        return;    }    // Navigate to the page    const pageNumber = result.page - 1; // PDF.js uses 0-based page numbers    pdfViewer.currentPageNumber = pageNumber + 1; // Some viewers use 1-based    // Wait for the page to render    await new Promise(resolve => setTimeout(resolve, 500));    // Get the page view    const pageView = pdfViewer.getPageView(pageNumber);    if (!pageView) {        console.error(\'Page view not found for page:\', pageNumber);        return;    }    console.log(\'Found page view:\', pageView);    // Get the text layer    const textLayer = pageView.textLayer;    if (!textLayer) {        console.error(\'Text layer not found for page:\', pageNumber);        return;    }    console.log(\'Found text layer:\', textLayer);    // Wait for the text layer to be ready    await new Promise(resolve => {        if (textLayer.renderingDone) {            resolve();        } else {            textLayer.onRender = resolve;        }    });    // Get all text spans in the text layer    const textSpans = textLayer.textLayerDiv.querySelectorAll(\'.textLayer > span, .textLayer > div > span\');    console.log(\'Found text spans:\', textSpans.length);    // Clear previous highlights    document.querySelectorAll(\'.icap-highlight\').forEach(el => {        el.classList.remove(\'icap-highlight\');    });    // Add highlight to matching text    const keywords = result.keywords || window.currentSearchKeywords || [];    if (keywords.length === 0) {        console.error(\'No keywords to highlight\');        return;    }    console.log(\'Highlighting keywords:\', keywords);        let found = false;    textSpans.forEach(span => {        const text = span.textContent.toLowerCase();        const matches = keywords.some(keyword =>             text.includes(keyword.toLowerCase())        );                if (matches) {            span.classList.add(\'icap-highlight\');            span.style.backgroundColor = \'rgba(255, 255, 0, 0.5)\';            span.style.borderRadius = \'2px\';            span.style.padding = \'1px 2px\';            found = true;        }    });    console.log(\'Highlighting complete. Found matches:\', found);    // Scroll to the first highlight    const firstHighlight = document.querySelector(\'.icap-highlight\');    if (firstHighlight) {        firstHighlight.scrollIntoView({            behavior: \'smooth\',            block: \'center\',            inline: \'nearest\'        });    }}// Main search functionasync function searchPDF(keywords) {    console.log(\'searchPDF called with keywords:\', keywords);        try {        // Store keywords for highlighting        const searchKeywords = Array.isArray(keywords) ? keywords : [keywords];        window.currentSearchKeywords = searchKeywords;                // Try to find the PDF viewer instance        const viewer = window.PDFViewerApplication || window.icapPDFViewer;        if (!viewer) {            console.error(\'PDF viewer not found in window object\');            return { results: [] };        }        console.log(\'Found PDF viewer:\', viewer);        // Get the PDF document        const pdfDocument = viewer.pdfDocument || (viewer.pdfViewer?.pdfDocument);        if (!pdfDocument) {            console.error(\'PDF document not found\');            return { results: [] };        }                // Store keywords in a way that\'s accessible to the highlight function        const results = await extractTextFromPDF(pdfDocument, searchKeywords);                // Store the current search keywords for highlighting        if (results.length > 0) {            results[0].keywords = searchKeywords;        }                return { results };    } catch (error) {        console.error(\'Error in searchPDF:\', error);        return { results: [], error: error.message };    }}// Expose functions to window object in a way that works with Chrome\'s isolated worldsfunction exposeFunctions() {    console.log(\'Exposing functions to window object\');        // Create a namespace for our functions    window.icapPDFSearch = {        searchPDF,        highlightResultInPage    };        // Also expose directly to window for backward compatibility    window.searchPDF = searchPDF;    window.highlightResultInPage = highlightResultInPage;        console.log(\'Functions exposed to window:\', Object.keys(window.icapPDFSearch));}// Run the exposure when the script loadsdocument.addEventListener(\'DOMContentLoaded\', () => {    // Wait a bit to ensure the PDF viewer is fully loaded    setTimeout(exposeFunctions, 1000);});console.log(\'ICAP PDF Search content script loaded\');document.addEventListener(\'DOMContentLoaded\', async function() {    const searchInput = document.getElementById(\'searchInput\');    const searchButton = document.getElementById(\'searchButton\');    const resultsContainer = document.getElementById(\'results\');    const prevButton = document.getElementById(\'prevButton\');    const nextButton = document.getElementById(\'nextButton\');    const resultCount = document.getElementById(\'resultCount\');    // Removed the separate loading indicator to prevent duplicate \'Searching...\' messages    let currentResultIndex = 0;    let allResults = [];    // Add styles    const style = document.createElement(\'style\');    style.textContent = `        .loading {            margin: 10px 0;            padding: 10px;            background-color: #f0f0f0;            border-radius: 4px;            text-align: center;            color: #666;        }        .error {            color: #721c24;            background-color: #f8d7da;            border: 1px solid #f5c6cb;            padding: 10px;            border-radius: 4px;            margin: 10px 0;        }        .error p {            margin: 5px 0;        }        .result-item {            padding: 8px;            margin: 4px 0;            border: 1px solid #ddd;            border-radius: 4px;            cursor: pointer;        }        .result-item:hover {            background-color: #f5f5f5;        }        .result-item.active {            background-color: #e6f7ff;            border-color: #91d5ff;        }    `;    document.head.appendChild(style);    searchButton.addEventListener(\'click\', performSearch);    async function performSearch() {        const keywords = searchInput.value.trim();        if (!keywords) {            showError(\'Please enter some keywords to search\');            return;        }        // Extract up to 10 keywords        const keywordArray = keywords.split(\',\').map(k => k.trim()).filter(k => k.length > 0).slice(0, 10);        if (keywordArray.length === 0) {            showError(\'Please enter valid keywords to search\');            return;        }        // Clear previous results and show searching state        resultsContainer.innerHTML = \'\';        allResults = [];        currentResultIndex = 0;        resultCount.textContent = \'Searching...\';        try {            // Get active tab            const [activeTab] = await chrome.tabs.query({active: true, currentWindow: true});            if (!activeTab) {                throw new Error(\'No active tab found\');            }            console.log(\'Active tab URL:\', activeTab.url);            // Check if we\'re on a PDF page or ICAP Online            if (!activeTab.url.includes(\'icap\') && !activeTab.url.endsWith(\'.pdf\')) {                throw new Error(\'Please open a PDF document in the ICAP Online platform first\');            }            // Inject content script if not already injected            try {                await chrome.scripting.executeScript({                    target: { tabId: activeTab.id },                    files: [\'content.js\']                });                console.log(\'Content script injected successfully\');                                // Wait a bit for the content script to initialize                await new Promise(resolve => setTimeout(resolve, 500));            } catch (injectError) {                console.error(\'Error injecting content script:\', injectError);                throw new Error(\'Failed to initialize PDF search. Please refresh the page and try again.\');            }            // Execute the search function in the page context            const results = await chrome.scripting.executeScript({                target: { tabId: activeTab.id },                func: (keywords) => {                    return window.searchPDF(keywords);                },                args: [keywordArray],                world: \'MAIN\'            });            console.log(\'Search results:\', results);            if (!results || !results[0]) {                throw new Error(\'No response from search function\');            }                        const searchResult = results[0].result;                        if (searchResult.error) {                throw new Error(`Search error: ${searchResult.error}`);            }                        allResults = searchResult.results || [];                        if (allResults.length === 0) {                showMessage(\'No results found for the given keywords\');            } else {                console.log(`Found ${allResults.length} results:`, allResults);                updateResultCount();                displayResults();                await highlightResult(0);            }        } catch (error) {            console.error(\'Search error:\', error);            showError(`Error: ${error.message || \'Unknown error occurred. Please try again.\'}`);        }    }    function updateResultCount() {        resultCount.textContent = `Found ${allResults.length} results`;        prevButton.disabled = currentResultIndex === 0 || allResults.length === 0;        nextButton.disabled = currentResultIndex >= allResults.length - 1 || allResults.length === 0;    }    function displayResults() {        resultsContainer.innerHTML = \'\';        if (allResults.length === 0) {            showMessage(\'No results found\');            return;        }                // Automatically highlight the first result        highlightResult(0);        updateResultCount();    }    function showError(message) {        resultsContainer.innerHTML = `            <div class="error">                <p>${message}</p>                <p>Check the browser console (F12) for more details.</p>            </div>        `;    }    function showMessage(message) {        resultsContainer.innerHTML = `            <div style="padding: 10px; text-align: center; color: #666;">                ${message}            </div>        `;    }    prevButton.addEventListener(\'click\', () => {        if (currentResultIndex > 0) {            currentResultIndex--;            highlightResult(currentResultIndex);            updateResultCount();        }    });        nextButton.addEventListener(\'click\', () => {        if (currentResultIndex < allResults.length - 1) {            currentResultIndex++;            highlightResult(currentResultIndex);            updateResultCount();        }    });        // Add keyboard navigation    document.addEventListener(\'keydown\', (e) => {        if (allResults.length === 0) return;                if (e.key === \'ArrowLeft\' && currentResultIndex > 0) {            currentResultIndex--;            highlightResult(currentResultIndex);            updateResultCount();            e.preventDefault();        } else if (e.key === \'ArrowRight\' && currentResultIndex < allResults.length - 1) {            currentResultIndex++;            highlightResult(currentResultIndex);            updateResultCount();            e.preventDefault();        }    });    nextButton.addEventListener(\'click\', () => {        if (currentResultIndex < allResults.length - 1) {            currentResultIndex++;            highlightResult(currentResultIndex);        }    });    async function highlightResult(index) {        if (index < 0 || index >= allResults.length) return;                currentResultIndex = index;        const result = allResults[index];                // Update active state in results list        document.querySelectorAll(\'.result-item\').forEach((item, i) => {            if (i === index) {                item.classList.add(\'active\');            } else {                item.classList.remove(\'active\');            }        });        const [activeTab] = await chrome.tabs.query({active: true, currentWindow: true});        if (!activeTab) return;        try {            // Execute the highlight function in the page context            await chrome.scripting.executeScript({                target: { tabId: activeTab.id },                func: (result) => {                    if (window.highlightResultInPage) {                        window.highlightResultInPage(result);                    }                },                args: [result],                world: \'MAIN\'            });                        updateResultCount();        } catch (error) {            console.error(\'Error highlighting result:\', error);        }    }});';
-  document.body.appendChild(script);
+  // Utility to check if all keywords appear within 30-word window
+  function areKeywordsNear(text, keywords, maxWordsBetween = 30) {
+    const words = text.toLowerCase().split(/\s+/);
+    const keywordSet = new Set(keywords.map(k => k.toLowerCase()));
+    const lastSeen = new Map();
+    let foundAll = false;
+
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      for (const keyword of keywordSet) {
+        if (word.includes(keyword)) {
+          lastSeen.set(keyword, i);
+          if (lastSeen.size === keywordSet.size) {
+            const positions = Array.from(lastSeen.values());
+            const minPos = Math.min(...positions);
+            const maxPos = Math.max(...positions);
+            if (maxPos - minPos <= maxWordsBetween + keywordSet.size - 1) {
+              foundAll = true;
+              break;
+            }
+          }
+        }
+      }
+      if (foundAll) break;
+    }
+    return foundAll;
+  }
+
+  // Create input + result box
+  const input = document.createElement('input');
+  const resultBox = document.createElement('div');
+
+  Object.assign(input.style, {
+    position: 'fixed', top: '10px', right: '10px',
+    width: '200px', zIndex: 2147483647,
+    padding: '5px', fontSize: '13px',
+    border: '1px solid #ccc', background: 'white'
+  });
+
+  Object.assign(resultBox.style, {
+    position: 'fixed', top: '40px', right: '10px',
+    background: 'white', border: '1px solid #ccc',
+    padding: '5px', fontSize: '13px', maxWidth: '300px',
+    zIndex: 2147483647, display: 'none'
+  });
+
+  document.body.appendChild(input);
+  document.body.appendChild(resultBox);
+  input.focus();
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      const query = input.value.trim();
+      if (!query) return;
+
+      const keywords = query.split(',').map(w => w.trim()).filter(Boolean);
+      if (keywords.length === 0) return;
+
+      resultBox.style.display = 'block';
+      resultBox.textContent = 'Searching...';
+
+      const paragraphs = Array.from(document.body.querySelectorAll('p')).map(p => p.innerText || '');
+      let matchCount = 0;
+
+      for (const para of paragraphs) {
+        if (areKeywordsNear(para, keywords)) {
+          matchCount++;
+        }
+      }
+
+      resultBox.textContent = `✅ Found ${matchCount} matching paragraph${matchCount !== 1 ? 's' : ''}.`;
+      setTimeout(() => { resultBox.style.display = 'none'; }, 8000);
+    }
+  });
+
+  // Double shift toggle
+  let lastShift = 0, visible = true;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift') {
+      const now = Date.now();
+      if (now - lastShift < 400) {
+        visible = !visible;
+        input.style.display = visible ? 'block' : 'none';
+        resultBox.style.display = 'none';
+      }
+      lastShift = now;
+    }
+  });
 })();
