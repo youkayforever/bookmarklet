@@ -1,3 +1,39 @@
+(function() {
+  if (window.ICAP_LOADED) return;
+  window.ICAP_LOADED = true;
+
+  const container = document.createElement('div');
+  container.id = 'icap-ui';
+  container.style.position = 'fixed';
+  container.style.top = '10px';
+  container.style.right = '10px';
+  container.style.zIndex = '100000';
+  container.style.background = '#fff';
+  container.style.border = '1px solid #ccc';
+  container.style.padding = '6px';
+  container.style.borderRadius = '8px';
+  container.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Search words (comma-separated)';
+  input.style.padding = '4px';
+  input.style.width = '220px';
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Search';
+  btn.style.marginLeft = '6px';
+  btn.onclick = () => {
+    const words = input.value.split(',').map(w => w.trim()).filter(Boolean);
+    if (words.length) {
+      window.dispatchEvent(new CustomEvent('ICAP_TRIGGER_SEARCH', { detail: words }));
+    }
+  };
+
+  container.appendChild(input);
+  container.appendChild(btn);
+  document.body.appendChild(container);
+window.addEventListener('ICAP_TRIGGER_SEARCH', function(e) {
 // Utility function to check if all keywords appear within a 30-word window
 function areKeywordsNear(text, keywords, maxWordsBetween = 30) {
     // Convert text to lowercase and split into words
@@ -262,40 +298,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 console.log('ICAP PDF Search content script loaded');
 
-
-(function() {
-  if (document.getElementById('icap-search-box')) return;
-
-  const container = document.createElement('div');
-  container.id = 'icap-search-box';
-  container.style.position = 'fixed';
-  container.style.top = '10px';
-  container.style.right = '10px';
-  container.style.zIndex = '99999';
-  container.style.background = 'white';
-  container.style.border = '1px solid #ccc';
-  container.style.padding = '6px';
-  container.style.borderRadius = '8px';
-  container.style.boxShadow = '0 2px 6px rgba(0,0,0,0.2)';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = 'Search words (comma-separated)';
-  input.style.padding = '4px 8px';
-  input.style.minWidth = '260px';
-
-  const btn = document.createElement('button');
-  btn.textContent = 'Search';
-  btn.style.marginLeft = '6px';
-  btn.onclick = () => {
-    const words = input.value.split(',').map(w => w.trim()).filter(w => w);
-    if (words.length > 0) {
-      console.log('Searching for:', words);
-      window.postMessage({ type: 'ICAP_SEARCH', words }, '*');
-    }
-  };
-
-  container.appendChild(input);
-  container.appendChild(btn);
-  document.body.appendChild(container);
-})();
+});})();
